@@ -13,6 +13,9 @@ internal static class Program
     private const string LauncherExeName = "SuperVPN_Single.exe";
     private const string UninstallerExeName = "uninstall.exe";
     private const string UninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\SuperVPN";
+    private const string VcRuntimeRegistryPath = @"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64";
+    private const string VcRuntimeInstallerUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
+    private const string VcRuntimeInstallerArgs = "/install /quiet /norestart";
 
     [STAThread]
     private static void Main(string[] args)
@@ -35,6 +38,7 @@ internal static class Program
         EnsureLocalLauncherFiles(appDir);
         CreateOrUpdateShortcuts(appDir, appExe);
         WriteUninstallEntry(appDir);
+        EnsureRuntimeDependencies(appDir);
 
         if (File.Exists(appExe))
         {
@@ -44,6 +48,100 @@ internal static class Program
                 WorkingDirectory = appDir,
                 UseShellExecute = true
             });
+        }
+    }
+
+    private static void EnsureRuntimeDependencies(string appDir)
+    {
+        if (IsVcRuntimeInstalled() || HasAppLocalVcRuntime(appDir))
+        {
+            return;
+        }
+
+        TryInstallVcRuntime();
+    }
+
+    private static bool HasAppLocalVcRuntime(string appDir)
+    {
+        string[] files =
+        {
+            "msvcp140.dll",
+            "vcruntime140.dll",
+            "vcruntime140_1.dll"
+        };
+
+        foreach (string file in files)
+        {
+            if (!File.Exists(Path.Combine(appDir, file)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsVcRuntimeInstalled()
+    {
+        foreach (RegistryKey root in new[] { Registry.LocalMachine, Registry.CurrentUser })
+        {
+            using RegistryKey? key = root.OpenSubKey(VcRuntimeRegistryPath);
+            if (key is null)
+            {
+                continue;
+            }
+
+            object? installed = key.GetValue("Installed");
+            if (installed is int flag && flag == 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void TryInstallVcRuntime()
+    {
+        string installerPath = Path.Combine(Path.GetTempPath(), $"vc_redist_{Guid.NewGuid():N}.exe");
+
+        try
+        {
+            using var httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromMinutes(2)
+            };
+
+            using HttpResponseMessage response = httpClient.GetAsync(VcRuntimeInstallerUrl).GetAwaiter().GetResult();
+            response.EnsureSuccessStatusCode();
+
+            using Stream source = response.Content.ReadAsStream();
+            using FileStream target = File.Create(installerPath);
+            source.CopyTo(target);
+
+            var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = installerPath,
+                Arguments = VcRuntimeInstallerArgs,
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+
+            if (process is null)
+            {
+                return;
+            }
+
+            process.WaitForExit();
+        }
+        catch
+        {
+            // Best-effort dependency bootstrap. App may still run if runtime exists app-local.
+        }
+        finally
+        {
+            TryDeleteFile(installerPath);
         }
     }
 

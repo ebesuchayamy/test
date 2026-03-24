@@ -47,7 +47,11 @@ powershell -ExecutionPolicy Bypass -File .\build\build-single-exe.ps1
     - Start Menu: `Programs\\SuperVPN\\Uninstall SuperVPN.lnk`
 5. Пишет запись удаления в реестр:
     - HKLM или HKCU: `Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SuperVPN`
-6. Запускает `super_vpn.exe`.
+6. Проверяет зависимости VC++ runtime:
+    - если найден установленный runtime x64, продолжает запуск;
+    - если рядом с приложением есть app-local `msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`, продолжает запуск;
+    - иначе скачивает `vc_redist.x64.exe` с официального URL Microsoft и запускает тихую установку.
+7. Запускает `super_vpn.exe`.
 
 ## Что делает деинсталлятор
 
